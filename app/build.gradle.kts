@@ -1,8 +1,5 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -14,8 +11,10 @@ android {
         applicationId = "com.tube.tv"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes the workflow run number so the installed app reports the same version as its release tag.
+        val build = System.getenv("TUBE_BUILD_NUMBER")?.toIntOrNull()
+        versionCode = build ?: 1
+        versionName = if (build != null) "0.1.$build" else "0.1.0"
     }
 
     buildTypes {
@@ -27,6 +26,7 @@ android {
     }
 
     compileOptions {
+        // Bytecode level for the device (AGP 9 built-in Kotlin follows this); the build itself runs on JDK 25.
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
         // NewPipeExtractor uses java.time / java.util.* APIs newer than minSdk 24.
@@ -40,10 +40,6 @@ android {
     }
 
     testOptions { unitTests.isReturnDefaultValues = true }
-}
-
-kotlin {
-    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
 }
 
 dependencies {

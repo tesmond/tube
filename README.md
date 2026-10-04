@@ -13,7 +13,7 @@ There is no Gradle wrapper checked in yet. Either open the project in Android St
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Requires JDK 17+, Android SDK 35. minSdk is 24.
+Requires JDK 25 (JetBrains, pinned in `gradle/gradle-daemon-jvm.properties`), Gradle 9.6 via the wrapper, AGP 9.4, Android SDK 35. minSdk is 24.
 
 ## Layout (ADR section -> code)
 
