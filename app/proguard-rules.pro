@@ -1,0 +1,12 @@
+# NewPipeExtractor (see https://github.com/TeamNewPipe/NewPipe/blob/dev/app/proguard-rules.pro)
+-dontwarn org.mozilla.javascript.JavaToJSONConverters
+-dontwarn org.mozilla.javascript.tools.**
+-dontwarn org.mozilla.classfile.ClassFileWriter
+-dontwarn javax.script.**
+-dontwarn jdk.dynalink.**
+-dontwarn java.beans.**
+-keep class org.mozilla.javascript.** { *; }
+-keep class org.mozilla.classfile.** { *; }
+-keep class org.schabi.newpipe.extractor.timeago.patterns.** { *; }
+-keep class org.schabi.newpipe.extractor.services.youtube.protos.** { *; }
+-keep class com.grack.nanojson.** { *; }
