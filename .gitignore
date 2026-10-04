@@ -36,3 +36,4 @@ captures/
 !gradle/wrapper/gradle-wrapper.jar
 
 docs/
+.vscode/

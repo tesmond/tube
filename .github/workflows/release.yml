@@ -1,0 +1,63 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      # No wrapper is checked in, so install Gradle directly (AGP 8.7 needs 8.9+).
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest --no-daemon
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Name the APK
+        id: apk
+        run: |
+          VERSION="0.1.${{ github.run_number }}"
+          cp app/build/outputs/apk/debug/app-debug.apk "tube-${VERSION}.apk"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "file=tube-${VERSION}.apk" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tube-apk
+          path: ${{ steps.apk.outputs.file }}
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.apk.outputs.version }}" "${{ steps.apk.outputs.file }}" \
+            --target "${{ github.sha }}" \
+            --title "Tube ${{ steps.apk.outputs.version }}" \
+            --generate-notes
