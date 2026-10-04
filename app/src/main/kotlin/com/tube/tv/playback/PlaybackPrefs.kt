@@ -10,6 +10,11 @@ class PlaybackPrefs(context: Context) {
         get() = sp.getInt("quality", QUALITY_AUTO)
         set(v) = sp.edit { putInt("quality", v) }
 
+    /** Loudness boost in millibels (100 mB = 1 dB). YouTube audio is mastered quiet, so default to +6 dB. */
+    var boostMb: Int
+        get() = sp.getInt("boost_mb", 600)
+        set(v) = sp.edit { putInt("boost_mb", v) }
+
     var speed: Float
         get() = sp.getFloat("speed", 1f)
         set(v) = sp.edit { putFloat("speed", v) }

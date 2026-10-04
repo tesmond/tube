@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.tv.material3.LocalContentColor
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.tv.material3.MaterialTheme
@@ -25,6 +27,9 @@ fun TubeTheme(content: @Composable () -> Unit) {
             onBackground = Color.White,
         ),
     ) {
-        Box(Modifier.fillMaxSize().background(Ink)) { content() }
+        // tv-material's default content colour is black; make bare Text readable on the dark background.
+        CompositionLocalProvider(LocalContentColor provides Color.White) {
+            Box(Modifier.fillMaxSize().background(Ink)) { content() }
+        }
     }
 }

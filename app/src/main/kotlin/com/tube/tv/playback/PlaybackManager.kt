@@ -3,9 +3,11 @@ package com.tube.tv.playback
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.audiofx.LoudnessEnhancer
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.net.toUri
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -64,8 +66,11 @@ class PlaybackManager(
     private val _state = MutableStateFlow(PlaybackState())
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
 
-    var player: ExoPlayer? = null
-        private set
+    private val _player = MutableStateFlow<ExoPlayer?>(null)
+
+    /** Observable so the video surface is (re)attached when the player is created or released. */
+    val playerFlow: StateFlow<ExoPlayer?> = _player.asStateFlow()
+    val player: ExoPlayer? get() = _player.value
     var session: MediaSession? = null
         private set
 
@@ -85,6 +90,9 @@ class PlaybackManager(
 
     private var queue: List<String> = emptyList()
     private var queueIndex = -1
+
+    /** Used only when the strict (hardware-aware) pick finds nothing: better to try than to give up. */
+    private val permissive = FormatSelector { Support.HARDWARE }
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var networkRegisteredAt = 0L
@@ -191,6 +199,29 @@ class PlaybackManager(
         _state.update { it.copy(speed = speed) }
     }
 
+    /** Louder-than-source playback via the platform LoudnessEnhancer. 0 turns it off. */
+    fun setBoost(mb: Int) {
+        prefs.boostMb = mb
+        _state.update { it.copy(boostMb = mb) }
+        attachEnhancer(audioSessionId)
+    }
+
+    private var enhancer: LoudnessEnhancer? = null
+    private var audioSessionId = C.AUDIO_SESSION_ID_UNSET
+
+    private fun attachEnhancer(sessionId: Int) {
+        audioSessionId = sessionId
+        runCatching { enhancer?.release() }
+        enhancer = null
+        if (prefs.boostMb <= 0 || sessionId == C.AUDIO_SESSION_ID_UNSET) return
+        enhancer = runCatching {
+            LoudnessEnhancer(sessionId).apply {
+                setTargetGain(prefs.boostMb)
+                enabled = true
+            }
+        }.onFailure { Log.w(TAG, "LoudnessEnhancer unavailable", it) }.getOrNull()
+    }
+
     fun setQuality(height: Int) {
         prefs.qualityHeight = height
         heightCap = Int.MAX_VALUE
@@ -252,13 +283,16 @@ class PlaybackManager(
         idleJob?.cancel()
         unregisterNetwork()
         saveResume()
+        runCatching { enhancer?.release() }
+        enhancer = null
+        audioSessionId = C.AUDIO_SESSION_ID_UNSET
         session?.release()
         session = null
         player?.let {
             it.removeListener(listener)
             it.release()
         }
-        player = null
+        _player.value = null
         media = null
         activeVideo = null
         resolver.invalidate()
@@ -293,6 +327,7 @@ class PlaybackManager(
             phase = Phase.RESOLVING,
             videoId = videoId,
             speed = prefs.speed,
+            boostMb = prefs.boostMb,
             quality = prefs.qualityHeight,
             sleepAtMs = _state.value.sleepAtMs, // a sleep timer outlives a queue advance
             hasPrevious = queueIndex > 0,
@@ -372,13 +407,24 @@ class PlaybackManager(
 
     private fun select(m: ResolvedMedia): Selection {
         if (m.isLive) return Selection(null, null, emptyList())
-        val video = selector.pickVideo(
-            m, prefs.qualityHeight, heightCap, playerFactory.bandwidthMeter.bitrateEstimate, excluded,
+        val bandwidth = playerFactory.bandwidthMeter.bitrateEstimate
+        var video = selector.pickVideo(m, prefs.qualityHeight, heightCap, bandwidth, excluded)
+        var heights = selector.availableHeights(m, excluded)
+        if (video == null) {
+            Log.w(TAG, "no format passed the decoder check; trying best-effort")
+            video = permissive.pickVideo(m, prefs.qualityHeight, minOf(heightCap, 1080), 0, excluded)
+            heights = permissive.availableHeights(m, excluded)
+        }
+        Log.i(
+            TAG,
+            "streams: ${m.videoStreams.size} video, ${m.audioStreams.size} audio; " +
+                "picked ${video?.height}p ${video?.codec} fps=${video?.fps} bitrate=${video?.bitrate} " +
+                "client=${video?.url?.toUri()?.getQueryParameter("c")} bw=$bandwidth",
         )
         val audio = if (video?.videoOnly == true) {
             selector.pickAudio(m, _state.value.audioTrackId, prefs.audioLanguage ?: Locale.getDefault().language)
         } else null
-        return Selection(video, audio, selector.availableHeights(m, excluded))
+        return Selection(video, audio, heights)
     }
 
     private fun buildSource(m: ResolvedMedia, sel: Selection, subs: List<SubtitleTrack>): MediaSource {
@@ -489,6 +535,8 @@ class PlaybackManager(
 
         override fun onTracksChanged(tracks: Tracks) = applySubtitleSelection()
 
+        override fun onAudioSessionIdChanged(audioSessionId: Int) = attachEnhancer(audioSessionId)
+
         override fun onPlayerError(error: PlaybackException) = recover(error)
     }
 
@@ -529,9 +577,11 @@ class PlaybackManager(
             return
         }
         val kind = classify(e)
+        Log.w(TAG, "playback error (${describe(e)}), attempt ${recoveryAttempts + 1}", e)
+        lastDetail = describe(e)
         if (kind == ErrorKind.UNSUPPORTED_CODEC) activeVideo?.let { excluded += it.key }
         if (recoveryAttempts >= MAX_RECOVERIES || totalRecoveries >= MAX_TOTAL_RECOVERIES) {
-            fail(ContentException(kind, e))
+            fail(ContentException(kind, e, lastDetail))
             return
         }
         recoveryAttempts++
@@ -547,6 +597,20 @@ class PlaybackManager(
             // An expired/failed URL needs a fresh resolution; a codec problem only needs another variant.
             load(id, pos, force = kind != ErrorKind.UNSUPPORTED_CODEC, play = play)
         }
+    }
+
+    private var lastDetail: String? = null
+
+    private fun describe(e: PlaybackException): String {
+        val http = generateSequence<Throwable>(e) { it.cause }
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+        val root = generateSequence<Throwable>(e) { it.cause }.last()
+        return buildString {
+            append(e.errorCodeName)
+            if (http != null) append(" HTTP ").append(http.responseCode)
+            else if (root !== e) append(": ").append(root.javaClass.simpleName).append(' ').append(root.message.orEmpty())
+        }.take(200)
     }
 
     private fun classify(e: PlaybackException): ErrorKind {
@@ -615,7 +679,8 @@ class PlaybackManager(
         player?.let { return it }
         val p = playerFactory.create()
         p.addListener(listener)
-        player = p
+        attachEnhancer(p.audioSessionId)
+        _player.value = p
         val open = PendingIntent.getActivity(
             context, 0, Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -629,6 +694,7 @@ class PlaybackManager(
     }
 
     private companion object {
+        const val TAG = "Tube"
         const val MAX_RECOVERIES = 3
         const val MAX_TOTAL_RECOVERIES = 8
         const val IDLE_RELEASE_MS = 5 * 60_000L

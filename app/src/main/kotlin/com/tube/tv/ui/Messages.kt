@@ -13,6 +13,7 @@ fun ContentException.userMessage(): String = when (kind) {
     ErrorKind.EXTRACTION -> "Couldn't get the video stream. Try again in a moment."
     ErrorKind.UNSUPPORTED_CODEC -> "This device can't decode any available format of this video."
     ErrorKind.STREAM_EXPIRED -> "The stream link expired."
+    ErrorKind.SIGNED_OUT -> "Sign in to your YouTube account to see this."
     ErrorKind.UNKNOWN -> "Something went wrong."
 }
 

@@ -30,7 +30,7 @@ import com.tube.tv.ui.TextDim
 import com.tube.tv.ui.TvButton
 import com.tube.tv.ui.formatDuration
 
-enum class Panel { QUALITY, SPEED, CAPTIONS, AUDIO, SLEEP, CHAPTERS }
+enum class Panel { QUALITY, SPEED, CAPTIONS, AUDIO, VOLUME, SLEEP, CHAPTERS }
 
 internal fun formatMs(ms: Long): String = formatDuration(ms / 1000)
 
@@ -105,6 +105,7 @@ fun ControlsOverlay(
                 val on = state.subtitleIndex >= 0
                 TvButton("Captions: " + if (on) state.subtitles[state.subtitleIndex].label else "Off", { onPanel(Panel.CAPTIONS) })
             }
+            item { TvButton("Volume: " + boostLabel(state.boostMb), { onPanel(Panel.VOLUME) }) }
             if (state.audioTracks.size > 1) item { TvButton("Audio", { onPanel(Panel.AUDIO) }) }
             item { TvButton("Loop: " + if (state.loop) "On" else "Off", { manager.setLoop(!state.loop); poke() }) }
             item { TvButton("Sleep" + if (state.sleepAtMs != null) ": On" else "", { onPanel(Panel.SLEEP) }) }
@@ -114,6 +115,10 @@ fun ControlsOverlay(
 }
 
 internal fun speedLabel(s: Float): String = if (s == s.toInt().toFloat()) "${s.toInt()}x" else "${s}x"
+
+internal val BOOSTS_MB = listOf(0, 300, 600, 900)
+
+internal fun boostLabel(mb: Int): String = if (mb <= 0) "Normal" else "+${mb / 100} dB"
 
 internal val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 internal val SLEEP_MINUTES = listOf(0, 15, 30, 45, 60, 90)
@@ -134,6 +139,9 @@ internal fun optionsFor(panel: Panel, state: PlaybackState, manager: PlaybackMan
     Panel.AUDIO -> state.audioTracks.map { t ->
         Option(t.label, state.audioTrackId == t.id) { manager.setAudioTrack(t.id) }
     }
+    Panel.VOLUME -> BOOSTS_MB.map { mb ->
+        Option(boostLabel(mb), state.boostMb == mb) { manager.setBoost(mb) }
+    }
     Panel.SLEEP -> SLEEP_MINUTES.map { m ->
         Option(
             if (m == 0) "Off" else "$m minutes",
@@ -150,6 +158,7 @@ internal fun panelTitle(panel: Panel): String = when (panel) {
     Panel.SPEED -> "Playback speed"
     Panel.CAPTIONS -> "Captions"
     Panel.AUDIO -> "Audio track"
+    Panel.VOLUME -> "Volume boost"
     Panel.SLEEP -> "Sleep timer"
     Panel.CHAPTERS -> "Chapters"
 }

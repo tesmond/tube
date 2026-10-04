@@ -40,6 +40,9 @@ data class PlaylistItem(
     override val title: String get() = name
 }
 
+/** A local viewer profile. Each has its own YouTube sign-in and resume positions. */
+data class Profile(val id: String, val name: String, val colorIndex: Int)
+
 /** Opaque continuation token owned by the data layer. */
 @JvmInline
 value class PageToken(val raw: Any)
@@ -106,8 +109,11 @@ data class ResolvedMedia(
 
 enum class ErrorKind {
     UNAVAILABLE, AGE_RESTRICTED, REGION_RESTRICTED, PRIVATE, REMOVED,
-    NETWORK, EXTRACTION, UNSUPPORTED_CODEC, STREAM_EXPIRED, UNKNOWN,
+    NETWORK, EXTRACTION, UNSUPPORTED_CODEC, STREAM_EXPIRED, SIGNED_OUT, UNKNOWN,
 }
 
-class ContentException(val kind: ErrorKind, cause: Throwable? = null) :
-    Exception(kind.name, cause)
+class ContentException(val kind: ErrorKind, cause: Throwable? = null, detail: String? = null) :
+    Exception(kind.name, cause) {
+    /** Technical one-liner shown under the friendly message so failures can be reported precisely. */
+    val detail: String? = detail ?: cause?.let { "${it.javaClass.simpleName}: ${it.message}".take(200) }
+}

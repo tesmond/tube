@@ -1,12 +1,23 @@
 package com.tube.tv.playback
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
 
-/** Tiny bounded (most-recent-100) map of videoId -> resume position, in one preferences key. */
-class ResumeStore(context: Context) {
-    private val sp = context.getSharedPreferences("resume", Context.MODE_PRIVATE)
-    private val map: LinkedHashMap<String, Long> by lazy { parse(sp.getString(KEY, "").orEmpty()) }
+/**
+ * Tiny bounded (most-recent-100) map of videoId -> resume position, kept per profile in one
+ * preferences key. Call [setProfile] before use.
+ */
+class ResumeStore(private val context: Context) {
+    private var sp: SharedPreferences? = null
+    private var map = LinkedHashMap<String, Long>()
+
+    @Synchronized
+    fun setProfile(prefsName: String) {
+        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        sp = prefs
+        map = parse(prefs.getString(KEY, "").orEmpty())
+    }
 
     @Synchronized
     fun get(videoId: String): Long? = map[videoId]
@@ -28,7 +39,9 @@ class ResumeStore(context: Context) {
         if (map.remove(videoId) != null) persist()
     }
 
-    private fun persist() = sp.edit { putString(KEY, map.entries.joinToString(";") { "${it.key}=${it.value}" }) }
+    private fun persist() {
+        sp?.edit { putString(KEY, map.entries.joinToString(";") { "${it.key}=${it.value}" }) }
+    }
 
     companion object {
         private const val KEY = "entries"

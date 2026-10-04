@@ -6,7 +6,6 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -21,8 +20,7 @@ class PlayerFactory(private val context: Context, httpClient: OkHttpClient) {
 
     val bandwidthMeter: DefaultBandwidthMeter = DefaultBandwidthMeter.getSingletonInstance(context)
 
-    val dataSourceFactory: DataSource.Factory =
-        OkHttpDataSource.Factory(httpClient).setUserAgent(USER_AGENT)
+    val dataSourceFactory: DataSource.Factory = YoutubeDataSource.Factory(httpClient)
 
     fun create(): ExoPlayer {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -63,9 +61,5 @@ class PlayerFactory(private val context: Context, httpClient: OkHttpClient) {
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
             .build()
-    }
-
-    private companion object {
-        const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0"
     }
 }

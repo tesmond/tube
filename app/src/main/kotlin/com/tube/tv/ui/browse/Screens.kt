@@ -6,6 +6,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.text.font.FontWeight
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.os.SystemClock
+import com.tube.tv.domain.ContentException
+import com.tube.tv.domain.DeviceCode
+import com.tube.tv.domain.LoginResult
+import com.tube.tv.ui.Spinner
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,17 +72,27 @@ private fun Header(title: String, actions: @Composable () -> Unit = {}) {
 @Composable
 fun HomeScreen(
     container: AppContainer,
+    onSwitchProfile: () -> Unit,
     onSearch: () -> Unit,
+    onHistory: () -> Unit,
+    onAccount: () -> Unit,
     onOpen: (BrowseItem, List<String>) -> Unit,
 ) {
     val vm: PagedListViewModel = viewModel()
-    LaunchedEffect(Unit) {
-        // Trending has no continuation: drop the token so scrolling never re-requests it.
-        vm.start({ _ -> container.contentRepository.trending().copy(next = null) })
-    }
+    val signedIn by container.auth.signedIn.collectAsStateWithLifecycle()
+    val profile by container.profiles.active.collectAsStateWithLifecycle()
+    // Reloads when the account changes (personalised feed vs public), but not when returning from the player.
+    LaunchedEffect(signedIn) { vm.start({ token -> container.feeds.home(token) }, key = signedIn) }
     Column {
-        Header("Tube") { TvButton("Search", onSearch) }
-        BrowseGrid(vm, onOpen, emptyText = "Nothing trending right now. Try searching.")
+        Header(if (signedIn) "Home" else "Trending") {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TvButton("Search", onSearch)
+                TvButton("History", onHistory)
+                TvButton(if (signedIn) "Account" else "Sign in", onAccount)
+                TvButton(profile?.name?.let { "Profile: $it" } ?: "Profiles", onSwitchProfile)
+            }
+        }
+        BrowseGrid(vm, onOpen, emptyText = "Nothing to show right now. Try searching.")
     }
 }
 
@@ -84,9 +105,12 @@ fun SearchScreen(container: AppContainer, onOpen: (BrowseItem, List<String>) -> 
     val fieldFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
 
+    var lastSubmitted by rememberSaveable { mutableStateOf("") }
+
     fun submit() {
         val q = query.trim()
         if (q.isEmpty()) return
+        lastSubmitted = q
         keyboard?.hide()
         // Searching only on submit (not per keystroke) avoids needless network requests.
         vm.start({ token -> container.contentRepository.search(q, token) }, force = true)
@@ -94,6 +118,13 @@ fun SearchScreen(container: AppContainer, onOpen: (BrowseItem, List<String>) -> 
 
     LaunchedEffect(Unit) {
         if (!vm.state.value.started) runCatching { fieldFocus.requestFocus() }
+    }
+    // TV keyboards don't always deliver the Search action, so also search once typing pauses.
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.length < 2 || q == lastSubmitted) return@LaunchedEffect
+        delay(1_000)
+        submit()
     }
 
     val shape = RoundedCornerShape(10.dp)
@@ -166,5 +197,119 @@ fun PlaylistScreen(
     Column {
         Header(title)
         BrowseGrid(vm, onOpen, queueFromList = true, emptyText = "This playlist is empty.")
+    }
+}
+
+@Composable
+fun HistoryScreen(
+    container: AppContainer,
+    onAccount: () -> Unit,
+    onOpen: (BrowseItem, List<String>) -> Unit,
+) {
+    val vm: PagedListViewModel = viewModel()
+    val signedIn by container.auth.signedIn.collectAsStateWithLifecycle()
+    if (!signedIn) {
+        val focus = remember { FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+        Column(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("Sign in to see your YouTube watch history.", style = MaterialTheme.typography.headlineSmall)
+            TvButton("Sign in", onAccount, Modifier.focusRequester(focus))
+        }
+        return
+    }
+    LaunchedEffect(Unit) { vm.start({ token -> container.feeds.history(token) }) }
+    Column {
+        Header("History")
+        BrowseGrid(vm, onOpen, emptyText = "Your watch history is empty.")
+    }
+}
+
+private sealed interface AccountUi {
+    data object Idle : AccountUi
+    data object Working : AccountUi
+    data class ShowCode(val code: DeviceCode) : AccountUi
+    data class Failed(val message: String) : AccountUi
+}
+
+@Composable
+fun AccountScreen(container: AppContainer, onHistory: () -> Unit) {
+    val auth = container.auth
+    val signedIn by auth.signedIn.collectAsStateWithLifecycle()
+    var ui by remember { mutableStateOf<AccountUi>(AccountUi.Idle) }
+    var attempt by remember { mutableIntStateOf(0) }
+    val primary = remember { FocusRequester() }
+
+    // Device-code sign-in. Lives in composition, so leaving the screen cancels the polling.
+    LaunchedEffect(attempt) {
+        if (attempt == 0) return@LaunchedEffect
+        ui = AccountUi.Working
+        try {
+            val code = auth.startDeviceLogin()
+            ui = AccountUi.ShowCode(code)
+            val deadline = SystemClock.elapsedRealtime() + code.expiresInSec * 1000L
+            var interval = code.intervalSec
+            while (SystemClock.elapsedRealtime() < deadline) {
+                delay(interval * 1000L)
+                when (val result = auth.pollLogin(code)) {
+                    LoginResult.Success -> {
+                        ui = AccountUi.Idle
+                        return@LaunchedEffect
+                    }
+                    LoginResult.SlowDown -> interval += 5
+                    LoginResult.Pending -> Unit
+                    is LoginResult.Failed -> {
+                        ui = AccountUi.Failed(result.reason)
+                        return@LaunchedEffect
+                    }
+                }
+            }
+            ui = AccountUi.Failed("The code expired. Try again.")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ui = AccountUi.Failed((e as? ContentException)?.detail ?: e.message ?: "Network problem. Try again.")
+        }
+    }
+    LaunchedEffect(signedIn, ui) { runCatching { primary.requestFocus() } }
+
+    Column(
+        Modifier.fillMaxSize().padding(48.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("YouTube account", style = MaterialTheme.typography.headlineMedium)
+        container.profiles.active.value?.let { Text("Profile: ${it.name}", color = TextDim) }
+        val current = ui
+        when {
+            signedIn -> {
+                Text("You're signed in. Your recommendations and watch history are available.", color = TextDim)
+                TvButton("View history", onHistory, Modifier.focusRequester(primary))
+                TvButton("Sign out", { auth.signOut() })
+            }
+            current is AccountUi.Working -> {
+                Spinner()
+                TvButton("Cancel", { ui = AccountUi.Idle; attempt = 0 }, Modifier.focusRequester(primary))
+            }
+            current is AccountUi.ShowCode -> {
+                Text("On your phone or computer, go to", color = TextDim)
+                Text(current.code.verificationUrl, style = MaterialTheme.typography.headlineSmall)
+                Text("and enter this code", color = TextDim)
+                Text(
+                    current.code.userCode,
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text("Waiting for you to approve…", color = TextDim)
+                TvButton("Cancel", { ui = AccountUi.Idle; attempt = 0 }, Modifier.focusRequester(primary))
+            }
+            else -> {
+                if (current is AccountUi.Failed) Text(current.message, color = TextDim)
+                TvButton("Sign in with a code", { attempt++ }, Modifier.focusRequester(primary))
+            }
+        }
     }
 }

@@ -19,6 +19,7 @@ data class PlaybackState(
     val quality: Int = QUALITY_AUTO,
     val activeHeight: Int? = null,
     val speed: Float = 1f,
+    val boostMb: Int = 0,
     val subtitles: List<SubtitleTrack> = emptyList(),
     /** Index into [subtitles], or -1 for off. */
     val subtitleIndex: Int = -1,

@@ -11,7 +11,7 @@ activityCompose = "1.9.3"
 tvMaterial = "1.0.0"
 okhttp = "4.12.0"
 coreKtx = "1.15.0"
-newpipeExtractor = "v0.24.8"
+newpipeExtractor = "v0.26.5"
 desugar = "2.1.4"
 junit = "4.13.2"
 

@@ -12,6 +12,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -40,10 +41,14 @@ class PagedListViewModel : ViewModel() {
     /** Survives navigation to the player so focus can return to the same card. */
     var lastFocusedId: String? = null
 
-    fun start(loader: PageLoader, force: Boolean = false) {
-        if (this.loader != null && !force) return
+    private var key: Any? = null
+
+    /** Starts loading once; restarts only when [force] is set or [key] differs from the last start. */
+    fun start(loader: PageLoader, force: Boolean = false, key: Any? = null) {
+        if (this.loader != null && !force && this.key == key) return
         job?.cancel()
         this.loader = loader
+        this.key = key
         next = null
         lastFocusedId = null
         _state.value = PagedState(started = true)
@@ -62,6 +67,7 @@ class PagedListViewModel : ViewModel() {
             _state.update { it.copy(loading = true, error = null) }
             try {
                 val page = l(if (first) null else next)
+                ensureActive() // a newer search may have replaced this one while it was in flight
                 next = page.next
                 _state.update { cur ->
                     val merged = LinkedHashMap<String, BrowseItem>()
@@ -77,8 +83,10 @@ class PagedListViewModel : ViewModel() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: ContentException) {
+                ensureActive()
                 _state.update { it.copy(loading = false, error = e) }
             } catch (e: Exception) {
+                ensureActive()
                 _state.update { it.copy(loading = false, error = ContentException(ErrorKind.UNKNOWN, e)) }
             }
         }

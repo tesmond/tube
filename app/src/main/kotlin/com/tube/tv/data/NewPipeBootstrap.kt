@@ -1,7 +1,10 @@
 package com.tube.tv.data
 
 import kotlinx.coroutines.CancellationException
+import java.io.InterruptedIOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
 import okhttp3.OkHttpClient
 import org.schabi.newpipe.extractor.NewPipe
@@ -35,5 +38,10 @@ internal suspend fun <T> blockingIo(client: OkHttpClient, block: () -> T): T =
     } catch (e: CancellationException) {
         throw e
     } catch (e: Throwable) {
+        // A cancelled request (e.g. a newer search replaced it) surfaces as an interrupted-I/O
+        // exception. That is not a failure: rethrow as cancellation so no error is reported.
+        currentCoroutineContext().ensureActive()
+        if (e is InterruptedIOException || e is InterruptedException) throw CancellationException("interrupted")
+        android.util.Log.w("Tube", "extractor request failed", e)
         throw e.toContentException()
     }

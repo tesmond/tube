@@ -98,21 +98,27 @@ fun BrowseCard(item: BrowseItem, onClick: () -> Unit, modifier: Modifier = Modif
         Column {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color(0xFF101016))) {
                 Thumbnail(item.thumbnailUrl, Modifier.fillMaxSize())
-                val badge = when (item) {
-                    is VideoItem -> if (item.isLive) "LIVE" else formatDuration(item.durationSeconds)
+                val badge: String? = when (item) {
+                    is VideoItem -> when {
+                        item.isLive -> "LIVE"
+                        item.durationSeconds > 0 -> formatDuration(item.durationSeconds)
+                        else -> null
+                    }
                     is PlaylistItem -> "${item.videoCount} videos"
                     is ChannelItem -> "Channel"
                 }
-                Text(
-                    badge,
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Color(0xCC000000))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
+                if (badge != null) {
+                    Text(
+                        badge,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xCC000000))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
             }
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
@@ -176,6 +182,7 @@ fun ErrorPanel(error: ContentException, onRetry: (() -> Unit)?, modifier: Modifi
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(error.userMessage(), style = MaterialTheme.typography.headlineSmall)
+        error.detail?.let { Text(it, fontSize = 16.sp, color = TextDim, modifier = Modifier.padding(horizontal = 64.dp)) }
         if (onRetry != null) TvButton("Retry", onRetry, Modifier.focusRequester(focus))
     }
 }

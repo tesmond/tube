@@ -9,9 +9,13 @@ import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.tube.tv.data.NewPipeBootstrap
+import com.tube.tv.data.InnerTubeFeedRepository
 import com.tube.tv.data.NewPipeContentRepository
+import com.tube.tv.data.ProfileRepository
 import com.tube.tv.data.NewPipeStreamResolver
+import com.tube.tv.data.YouTubeAuth
 import com.tube.tv.domain.ContentRepository
+import com.tube.tv.domain.FeedRepository
 import com.tube.tv.domain.StreamResolver
 import com.tube.tv.playback.FormatSelector
 import com.tube.tv.playback.MediaCodecCapabilities
@@ -41,8 +45,12 @@ class AppContainer(private val app: Application) {
     val contentRepository: ContentRepository by lazy { NewPipeContentRepository(httpClient) }
     val streamResolver: StreamResolver by lazy { NewPipeStreamResolver(httpClient) }
 
+    val auth: YouTubeAuth by lazy { YouTubeAuth(app, httpClient) }
+    val feeds: FeedRepository by lazy { InnerTubeFeedRepository(httpClient, auth, contentRepository) }
+
     val playbackPrefs by lazy { PlaybackPrefs(app) }
     private val resumeStore by lazy { ResumeStore(app) }
+    val profiles: ProfileRepository by lazy { ProfileRepository(app) }
     private val playerFactory by lazy { PlayerFactory(app, httpClient) }
 
     private val playbackLazy = lazy {
@@ -82,6 +90,14 @@ class AppContainer(private val app: Application) {
             .crossfade(false)
             .respectCacheHeaders(false)
             .build()
+    }
+
+    /** Switches the whole app to a profile: its own account tokens and resume positions. */
+    fun selectProfile(id: String) {
+        playbackManagerOrNull?.stop()
+        profiles.select(id)
+        auth.setProfile(id)
+        resumeStore.setProfile(ProfileRepository.resumePrefsName(id))
     }
 
     /** Loads the (large) extractor classes off the main thread so the first search is fast. */

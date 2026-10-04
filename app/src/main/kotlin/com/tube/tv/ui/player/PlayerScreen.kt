@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -60,6 +62,7 @@ import kotlinx.coroutines.isActive
 @Composable
 fun PlayerScreen(manager: PlaybackManager, videoId: String, onExit: () -> Unit) {
     val state by manager.state.collectAsStateWithLifecycle()
+    val player by manager.playerFlow.collectAsStateWithLifecycle()
 
     // Start playback, and leave when the manager tears itself down (e.g. after a long time in background).
     LaunchedEffect(videoId) {
@@ -70,7 +73,7 @@ fun PlayerScreen(manager: PlaybackManager, videoId: String, onExit: () -> Unit) 
     // Leaving the screen always releases the player, session and decoders.
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { manager.stop() } }
 
-    var controlsVisible by remember { mutableStateOf(false) }
+    var controlsVisible by remember { mutableStateOf(true) }
     var panel by remember { mutableStateOf<Panel?>(null) }
     var interaction by remember { mutableIntStateOf(0) }
     var scrubMs by remember { mutableStateOf<Long?>(null) }
@@ -186,12 +189,16 @@ fun PlayerScreen(manager: PlaybackManager, videoId: String, onExit: () -> Unit) 
                     subtitleView?.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 1.4f)
                 }
             },
-            update = { it.player = manager.player },
+            update = { it.player = player },
             onRelease = { it.player = null },
         )
 
         if (state.phase == Phase.RESOLVING || state.phase == Phase.BUFFERING) {
             Box(Modifier.align(Alignment.Center)) { Spinner() }
+        }
+
+        if (!controlsVisible && !state.isLive && (state.phase == Phase.READY || state.phase == Phase.BUFFERING)) {
+            MiniProgress(manager, Modifier.align(Alignment.BottomCenter))
         }
 
         if (hudVisible && !controlsVisible) {
@@ -232,6 +239,7 @@ fun PlayerScreen(manager: PlaybackManager, videoId: String, onExit: () -> Unit) 
                     verticalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
                     Text(error.userMessage(), style = MaterialTheme.typography.headlineSmall)
+                    error.detail?.let { Text(it, fontSize = 16.sp, color = Color(0xFFB4B4C0)) }
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (error.isRetriable()) {
                             TvButton("Retry", manager::retry, Modifier.focusRequester(firstAction))
@@ -257,5 +265,20 @@ private fun SeekHud(positionMs: Long, durationMs: Long, modifier: Modifier = Mod
     ) {
         Text(formatMs(positionMs), style = MaterialTheme.typography.headlineSmall)
         Text("/ ${formatMs(durationMs)}", fontSize = 22.sp, color = Color(0xFFB4B4C0))
+    }
+}
+
+/** Slim progress line shown while the full controls are hidden. Ticks once a second. */
+@Composable
+private fun MiniProgress(manager: PlaybackManager, modifier: Modifier = Modifier) {
+    val fraction by produceState(0f) {
+        while (isActive) {
+            val d = manager.durationMs()
+            value = if (d > 0) (manager.positionMs().toFloat() / d).coerceIn(0f, 1f) else 0f
+            delay(1_000)
+        }
+    }
+    Box(modifier.fillMaxWidth().height(4.dp).background(Color(0x55FFFFFF))) {
+        Box(Modifier.fillMaxWidth(fraction).height(4.dp).background(Color(0xFFFF3D3D)))
     }
 }

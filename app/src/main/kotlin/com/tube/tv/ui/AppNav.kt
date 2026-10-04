@@ -16,11 +16,14 @@ import com.tube.tv.domain.BrowseItem
 import com.tube.tv.domain.ChannelItem
 import com.tube.tv.domain.PlaylistItem
 import com.tube.tv.domain.VideoItem
+import com.tube.tv.ui.browse.AccountScreen
 import com.tube.tv.ui.browse.ChannelScreen
+import com.tube.tv.ui.browse.HistoryScreen
 import com.tube.tv.ui.browse.HomeScreen
 import com.tube.tv.ui.browse.PlaylistScreen
 import com.tube.tv.ui.browse.SearchScreen
 import com.tube.tv.ui.player.PlayerScreen
+import com.tube.tv.ui.profile.ProfileScreen
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -50,16 +53,32 @@ fun AppNav(container: AppContainer) {
     // Minimal animation during navigation (ADR section 11): no transitions at all.
     NavHost(
         navController = nav,
-        startDestination = "home",
+        startDestination = "profiles",
         enterTransition = { EnterTransition.None },
         exitTransition = { ExitTransition.None },
         popEnterTransition = { EnterTransition.None },
         popExitTransition = { ExitTransition.None },
     ) {
+        composable("profiles") {
+            ProfileScreen(container, onSelected = { nav.navigate("home") })
+        }
         composable("home") {
-            HomeScreen(container, onSearch = { nav.navigate("search") }, onOpen = open)
+            HomeScreen(
+                container,
+                onSwitchProfile = { nav.popBackStack("profiles", inclusive = false) },
+                onSearch = { nav.navigate("search") },
+                onHistory = { nav.navigate("history") },
+                onAccount = { nav.navigate("account") },
+                onOpen = open,
+            )
         }
         composable("search") { SearchScreen(container, open) }
+        composable("history") {
+            HistoryScreen(container, onAccount = { nav.navigate("account") }, onOpen = open)
+        }
+        composable("account") {
+            AccountScreen(container, onHistory = { nav.navigate("history") { popUpTo("account") { inclusive = true } } })
+        }
         composable("channel?url={url}&title={title}", urlTitleArgs) { entry ->
             ChannelScreen(
                 container,

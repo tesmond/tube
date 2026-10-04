@@ -29,6 +29,19 @@ Requires JDK 17+, Android SDK 35. minSdk is 24.
 | 13 Concurrency | coroutines everywhere, `runInterruptible` around blocking extractor calls, ViewModel-scoped cancellation |
 | 14, 15 Failure and recovery | `PlaybackManager.recover/retry`, `ui/Messages.kt` |
 
+## Account sign-in and history
+
+Home -> Sign in shows a code; approve it at youtube.com/activate on a phone or computer. The app then uses
+InnerTube (TV client) with the OAuth token for the personalised home feed and watch history. Tokens are stored in
+app-private preferences. Videos watched in this app are not reported back to YouTube, so they will not appear in
+your account history.
+
+## Debugging
+
+Everything logs under the `Tube` tag (`adb logcat -s Tube`): extractor failures, which stream/codec/client was
+picked, playback errors with HTTP status, and feed parse results. The same technical detail is shown under error
+messages on screen.
+
 ## Deliberate choices / known gaps
 
 - **Extractor**: stream resolution uses [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) behind the
