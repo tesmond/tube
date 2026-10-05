@@ -115,5 +115,5 @@ enum class ErrorKind {
 class ContentException(val kind: ErrorKind, cause: Throwable? = null, detail: String? = null) :
     Exception(kind.name, cause) {
     /** Technical one-liner shown under the friendly message so failures can be reported precisely. */
-    val detail: String? = detail ?: cause?.let { "${it.javaClass.simpleName}: ${it.message}".take(200) }
+    val detail: String? = detail ?: cause?.let { "${it.javaClass.simpleName}: ${it.message}".take(600) }
 }

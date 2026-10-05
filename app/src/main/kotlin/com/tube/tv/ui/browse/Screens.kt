@@ -43,6 +43,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -104,6 +105,7 @@ fun SearchScreen(container: AppContainer, onOpen: (BrowseItem, List<String>) -> 
     var fieldFocused by remember { mutableStateOf(false) }
     val fieldFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     var lastSubmitted by rememberSaveable { mutableStateOf("") }
 
@@ -118,6 +120,15 @@ fun SearchScreen(container: AppContainer, onOpen: (BrowseItem, List<String>) -> 
 
     LaunchedEffect(Unit) {
         if (!vm.state.value.started) runCatching { fieldFocus.requestFocus() }
+    }
+    // Once a search is running or has failed, get the on-screen keyboard out of the way so the result or
+    // error (and its Retry button) can be read, and move focus off the text field so it doesn't pop back up.
+    val searchState by vm.state.collectAsStateWithLifecycle()
+    LaunchedEffect(searchState.loading, searchState.error) {
+        if (searchState.error != null || (searchState.loading && searchState.items.isEmpty())) {
+            keyboard?.hide()
+            focusManager.clearFocus()
+        }
     }
     // TV keyboards don't always deliver the Search action, so also search once typing pauses.
     LaunchedEffect(query) {
