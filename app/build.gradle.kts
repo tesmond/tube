@@ -2,7 +2,7 @@ import com.android.build.api.instrumentation.FramesComputationMode
 import com.android.build.api.instrumentation.InstrumentationScope
 
 plugins {
-    alias(libs.plugins.android.application)
+    id("com.android.application") // version comes from buildSrc (agpVersion there)
     alias(libs.plugins.kotlin.compose)
 }
 

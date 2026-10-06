@@ -1,4 +1,4 @@
 plugins {
-    alias(libs.plugins.android.application) apply false
+    // com.android.application is applied versionless in :app; AGP comes from buildSrc's classpath.
     alias(libs.plugins.kotlin.compose) apply false
 }
