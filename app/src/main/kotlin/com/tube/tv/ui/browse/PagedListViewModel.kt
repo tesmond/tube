@@ -22,6 +22,8 @@ data class PagedState(
     val error: ContentException? = null,
     val endReached: Boolean = false,
     val started: Boolean = false,
+    /** Bumped each time a new list is requested via start(); lets the UI react to a fresh result set. */
+    val generation: Int = 0,
 )
 
 typealias PageLoader = suspend (PageToken?) -> ResultPage<BrowseItem>
@@ -43,15 +45,24 @@ class PagedListViewModel : ViewModel() {
 
     private var key: Any? = null
 
-    /** Starts loading once; restarts only when [force] is set or [key] differs from the last start. */
-    fun start(loader: PageLoader, force: Boolean = false, key: Any? = null) {
+    /**
+     * Starts loading once; restarts only when [force] is set or [key] differs from the last start.
+     * With [keepItems] the current items stay visible until the first page of the new load replaces them
+     * (used by live search so the list doesn't flash empty on every query).
+     */
+    fun start(loader: PageLoader, force: Boolean = false, key: Any? = null, keepItems: Boolean = false) {
         if (this.loader != null && !force && this.key == key) return
         job?.cancel()
         this.loader = loader
         this.key = key
         next = null
         lastFocusedId = null
-        _state.value = PagedState(started = true)
+        val prev = _state.value
+        _state.value = if (keepItems) {
+            prev.copy(loading = false, error = null, endReached = false, started = true, generation = prev.generation + 1)
+        } else {
+            PagedState(started = true, generation = prev.generation + 1)
+        }
         load(first = true)
     }
 
@@ -84,10 +95,17 @@ class PagedListViewModel : ViewModel() {
                 throw e
             } catch (e: ContentException) {
                 ensureActive()
-                _state.update { it.copy(loading = false, error = e) }
+                // A failed first page drops stale items so the error panel (with Retry) is shown.
+                _state.update { it.copy(loading = false, error = e, items = if (first) emptyList() else it.items) }
             } catch (e: Exception) {
                 ensureActive()
-                _state.update { it.copy(loading = false, error = ContentException(ErrorKind.UNKNOWN, e)) }
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        error = ContentException(ErrorKind.UNKNOWN, e),
+                        items = if (first) emptyList() else it.items,
+                    )
+                }
             }
         }
     }

@@ -3,6 +3,10 @@ package com.tube.tv.domain
 interface ContentRepository {
     suspend fun trending(): ResultPage<BrowseItem>
     suspend fun search(query: String, page: PageToken?): ResultPage<BrowseItem>
+
+    /** Autocomplete suggestions for a partial query; best-effort, may be empty. */
+    suspend fun suggestions(query: String): List<String>
+
     suspend fun channelVideos(channelUrl: String, page: PageToken?): ResultPage<BrowseItem>
     suspend fun playlistVideos(playlistUrl: String, page: PageToken?): ResultPage<BrowseItem>
 }

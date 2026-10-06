@@ -16,7 +16,17 @@ import com.tube.tv.domain.DeviceCode
 import com.tube.tv.domain.LoginResult
 import com.tube.tv.ui.Spinner
 import kotlinx.coroutines.CancellationException
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,7 +53,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -97,7 +106,7 @@ fun HomeScreen(
     }
 }
 
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, FlowPreview::class)
 @Composable
 fun SearchScreen(container: AppContainer, onOpen: (BrowseItem, List<String>) -> Unit) {
     val vm: PagedListViewModel = viewModel()
@@ -105,37 +114,55 @@ fun SearchScreen(container: AppContainer, onOpen: (BrowseItem, List<String>) -> 
     var fieldFocused by remember { mutableStateOf(false) }
     val fieldFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
 
     var lastSubmitted by rememberSaveable { mutableStateOf("") }
+    // Results only take focus (and the keyboard goes away) after an explicit search; while the user is typing,
+    // live results update underneath without touching the keyboard or focus.
+    var focusResults by remember { mutableStateOf(false) }
+    var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    fun submit() {
-        val q = query.trim()
+    fun search(q: String, explicit: Boolean) {
         if (q.isEmpty()) return
         lastSubmitted = q
-        keyboard?.hide()
-        // Searching only on submit (not per keystroke) avoids needless network requests.
-        vm.start({ token -> container.contentRepository.search(q, token) }, force = true)
+        if (explicit) {
+            keyboard?.hide()
+            focusResults = true
+            suggestions = emptyList()
+        }
+        vm.start({ token -> container.contentRepository.search(q, token) }, force = true, keepItems = true)
     }
 
     LaunchedEffect(Unit) {
         if (!vm.state.value.started) runCatching { fieldFocus.requestFocus() }
     }
-    // Once a search is running or has failed, get the on-screen keyboard out of the way so the result or
-    // error (and its Retry button) can be read, and move focus off the text field so it doesn't pop back up.
-    val searchState by vm.state.collectAsStateWithLifecycle()
-    LaunchedEffect(searchState.loading, searchState.error) {
-        if (searchState.error != null || (searchState.loading && searchState.items.isEmpty())) {
-            keyboard?.hide()
-            focusManager.clearFocus()
-        }
+    // Autocomplete suggestions cut down remote-control typing. Fetched on a short debounce, best-effort.
+    LaunchedEffect(Unit) {
+        snapshotFlow { query.trim() }
+            .debounce(250)
+            .distinctUntilChanged()
+            .collectLatest { q ->
+                suggestions = if (q.isEmpty() || q == lastSubmitted) {
+                    emptyList()
+                } else {
+                    try {
+                        container.contentRepository.suggestions(q).take(6)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                }
+            }
     }
-    // TV keyboards don't always deliver the Search action, so also search once typing pauses.
-    LaunchedEffect(query) {
-        val q = query.trim()
-        if (q.length < 2 || q == lastSubmitted) return@LaunchedEffect
-        delay(1_000)
-        submit()
+    val searchState by vm.state.collectAsStateWithLifecycle()
+    // TV keyboards don't always deliver the Search action, so also search once typing pauses. This never hides
+    // the keyboard or moves focus, and collectLatest drops a stale search when another letter is typed.
+    LaunchedEffect(Unit) {
+        snapshotFlow { query.trim() }
+            .debounce(700)
+            .distinctUntilChanged()
+            .filter { it.length >= 2 && it != lastSubmitted }
+            .collectLatest { search(it, explicit = false) }
     }
 
     val shape = RoundedCornerShape(10.dp)
@@ -147,12 +174,15 @@ fun SearchScreen(container: AppContainer, onOpen: (BrowseItem, List<String>) -> 
         ) {
             BasicTextField(
                 value = query,
-                onValueChange = { query = it },
+                onValueChange = {
+                    query = it
+                    focusResults = false
+                },
                 singleLine = true,
                 textStyle = TextStyle(color = Color.White, fontSize = 26.sp),
                 cursorBrush = SolidColor(Color.White),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { submit() }),
+                keyboardActions = KeyboardActions(onSearch = { search(query.trim(), explicit = true) }),
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(fieldFocus)
@@ -175,9 +205,28 @@ fun SearchScreen(container: AppContainer, onOpen: (BrowseItem, List<String>) -> 
                     }
                 },
             )
-            TvButton("Search", ::submit)
+            TvButton("Search", { search(query.trim(), explicit = true) })
         }
-        BrowseGrid(vm, onOpen, emptyText = "No results.")
+        if (suggestions.isNotEmpty() && !focusResults) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 48.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(bottom = 12.dp),
+            ) {
+                items(suggestions, key = { it }) { s ->
+                    TvButton(s, {
+                        query = s
+                        search(s, explicit = true)
+                    })
+                }
+            }
+        }
+        // Thin progress line while a new query loads over the previous results.
+        Box(
+            Modifier.fillMaxWidth().height(3.dp)
+                .background(if (searchState.loading && searchState.items.isNotEmpty()) Color.White.copy(alpha = 0.6f) else Color.Transparent),
+        )
+        BrowseGrid(vm, onOpen, emptyText = "No results.", autoFocus = focusResults)
     }
 }
 

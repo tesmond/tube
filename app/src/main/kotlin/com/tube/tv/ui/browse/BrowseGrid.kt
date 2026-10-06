@@ -23,6 +23,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.first
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
 import com.tube.tv.domain.BrowseItem
@@ -48,6 +49,7 @@ fun BrowseGrid(
     modifier: Modifier = Modifier,
     queueFromList: Boolean = false,
     emptyText: String = "Nothing to show yet.",
+    autoFocus: Boolean = true,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val gridState = rememberLazyGridState()
@@ -55,12 +57,20 @@ fun BrowseGrid(
     val restoreId = remember { vm.lastFocusedId }
 
     val hasItems = state.items.isNotEmpty()
-    val initialId = remember(hasItems) {
+    val initialId = remember(hasItems, state.generation) {
         restoreId?.takeIf { id -> state.items.any { it.id == id } } ?: state.items.firstOrNull()?.id
     }
-    LaunchedEffect(hasItems) {
-        if (hasItems) runCatching { initialFocus.requestFocus() }
+    val loadingNow by rememberUpdatedState(state.loading)
+    // [autoFocus] = false lets a screen with a text field (search) keep focus, and the keyboard, while results
+    // arrive. Wait for the load to finish so focus never lands on stale items from the previous query.
+    LaunchedEffect(hasItems, state.generation, autoFocus) {
+        if (hasItems && autoFocus) {
+            snapshotFlow { loadingNow }.first { !it }
+            runCatching { initialFocus.requestFocus() }
+        }
     }
+    // A new result set (e.g. a new search) starts from the top rather than the old scroll position.
+    LaunchedEffect(state.generation) { gridState.scrollToItem(0) }
 
     val size by rememberUpdatedState(state.items.size)
     LaunchedEffect(gridState) {

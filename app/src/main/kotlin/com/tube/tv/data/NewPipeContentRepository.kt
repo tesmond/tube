@@ -49,6 +49,10 @@ class NewPipeContentRepository(private val client: OkHttpClient) : ContentReposi
             }
         }
 
+    override suspend fun suggestions(query: String): List<String> = blockingIo(client) {
+        yt.suggestionExtractor.suggestionList(query)
+    }
+
     override suspend fun channelVideos(channelUrl: String, page: PageToken?): ResultPage<BrowseItem> =
         blockingIo(client) {
             if (page == null) {
