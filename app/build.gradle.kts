@@ -1,3 +1,6 @@
+import com.android.build.api.instrumentation.FramesComputationMode
+import com.android.build.api.instrumentation.InstrumentationScope
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -40,6 +43,14 @@ android {
     }
 
     testOptions { unitTests.isReturnDefaultValues = true }
+}
+
+// Backport URLDecoder/URLEncoder.decode(String, Charset) calls in libraries (needs API 33) for older devices.
+androidComponents {
+    onVariants { variant ->
+        variant.instrumentation.transformClassesWith(UrlCharsetCompatFactory::class.java, InstrumentationScope.ALL) {}
+        variant.instrumentation.setAsmFramesComputationMode(FramesComputationMode.COPY_FRAMES)
+    }
 }
 
 dependencies {
